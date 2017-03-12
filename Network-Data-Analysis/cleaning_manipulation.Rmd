@@ -1,0 +1,201 @@
+---
+title: "Data - Cleaning and Manipulation"
+output: html_document
+---
+
+```{r}
+
+library(dplyr)
+library(reshape2)
+library(randomForest)
+
+```
+
+data1<-data
+
+```{r}
+#Upload the painterview_ticketdata.csv data.
+
+data<-read.csv(file.choose(),na.strings="",stringsAsFactors = T)
+
+summary(data)
+
+```
+
+The data has lots of NA's in data.Around 11278 NA's in Customer.SEGMENT,735 NA's in City , 176 NA's inProvince, 11 NA's in Condition , 1105  NA's in Dispatch.Tier ,319  NA's in RESOLUTION_CODE. Omiting those data could turn out to be a huge loss in data hence we impute values in them depending on certain logics.
+
+The standard procedure of using the Median for numerical values and Most frequent level in Categorical data doesnt add meaning hence we group variables,find patterns that exist in the data and then impute with values based on them.
+
+# Imputing NA's in Customer.SEGMENT column.
+
+The customer segment could be predicted by grouping the City,Province and Line of Business. After the groupings are complete we choose the customer segment that has repeated several number of time for a particular group. i.e if we find *Customer Segment : AB* has repeated several time for a *group that has A as City and B as Province* the next time when we encounter a missing value with such pattern we impute that empty cell with *AB*.
+
+```{r}
+summary(data$Customer.SEGMENT)
+
+Cust.seg=data %>% group_by(Province,City,Line.Of.Business)%>% 
+  select(City,Province,Line.Of.Business,Customer.SEGMENT) %>% 
+  summarise(max.repetiton = names(which(table(Customer.SEGMENT) == max(table(Customer.SEGMENT)))[1])) %>% 
+  arrange(Province,City,Line.Of.Business)
+
+str(data)
+
+tail(Cust.seg)
+
+dummy_df<-merge(data,Cust.seg, by=c("Province","City","Line.Of.Business")) %>% 
+  select(Province,City,Line.Of.Business,max.repetiton,Customer.SEGMENT)
+
+```
+
+In our dummy.data.frame the max.repetiton column indicates our prediction at that place while the Customer.SEGMENT indicates the existing values in the original data frame. We then use the max.repetion column's value to impute in our data if the Customer.SEGMENT column has missing values in it.
+
+```{r}
+
+head(dummy_df)
+
+```
+
+After imputing with our prediction look at the summary to find the details about the Customer.SEGMENT column.
+
+```{r}
+data$Customer.SEGMENT<-ifelse(is.na(data$Customer.SEGMENT),dummy_df$max.repetiton,as.character(data$Customer.SEGMENT))
+data$Customer.SEGMENT<-factor(data$Customer.SEGMENT)
+summary(data)
+
+```
+
+The above procedure is repeated on all other column using suitable variables depending on Business Logic.
+
+# Imputing Province
+
+Here the Province is predicted using other features- Customer.SEGMENT,Line.Of.Business and City. We group based on these variables and find patterns in the data.
+
+```{r}
+a=data %>% group_by(Customer.SEGMENT,City,Line.Of.Business)%>% 
+  select(City,Line.Of.Business,Customer.SEGMENT,Province) %>% 
+  summarise(max.repetiton = names(which(table(Province) == max(table(Province)))[1])) %>% 
+  arrange(Customer.SEGMENT,City,Line.Of.Business)
+
+head(a)
+
+dummy_df<-merge(data,a, by=c("Customer.SEGMENT","City","Line.Of.Business")) %>% 
+  select(City,Line.Of.Business,Customer.SEGMENT,Province,max.repetiton)
+
+head(dummy_df)
+
+table(dummy_df$Province==dummy_df$max)
+
+data$Province<-ifelse(is.na(data$Province),dummy_df$max.repetiton,as.character(data$Province))
+data$Province<-factor(data$Province)
+
+summary(data)
+
+```
+  
+# Imputing NA's in City 
+
+Here we use Province to find patterns and impute City.
+
+```{r}
+
+a=data %>% group_by(Province)%>% 
+  select(Province,City) %>% arrange(Province) %>% 
+  summarise(max = names(which(table(City) == max(table(City)))[1])) 
+
+head(a)
+  
+dummy_df<-merge(data,a, by=c("Province")) %>% 
+  select(Province,Line.Of.Business,Customer.SEGMENT,City,max)
+
+head(dummy_df)
+
+table(dummy_df$City==dummy_df$max)
+
+data$City<-ifelse(is.na(data$City),dummy_df$max,as.character(data$City))
+data$City<-factor(data$City)
+
+```
+
+# Imputing NA's in Dispatch.Tier 
+
+
+```{R}
+
+a= data %>% group_by(City,Province)%>% select(City,Province,Dispatch.Tier) %>% arrange(City,Province) %>% 
+  summarise(max = max(Dispatch.Tier)) 
+
+new<-merge(data,a, by=c("City","Province")) %>% 
+  select(City,max,Dispatch.Tier)
+
+data$Dispatch.Tier<-ifelse(is.na(data$Dispatch.Tier),new$max,data$Dispatch.Tier)
+
+data$Dispatch.Tier<-as.numeric(data$Dispatch.Tier)
+data$Dispatch.Tier<-na.roughfix(data$Dispatch.Tier)
+data$Dispatch.Tier<-as.factor(data$Dispatch.Tier)
+
+summary(data)
+```
+
+# Imputing NA's in RESOLUTION_CODE
+
+```{r}
+
+code<-names(which(table(data$RESOLUTION_CODE) == max(table(data$RESOLUTION_CODE))))
+
+data$RESOLUTION_CODE<-ifelse(is.na(data$RESOLUTION_CODE),as.character(code)
+                             ,as.character(data$RESOLUTION_CODE))
+
+data$RESOLUTION_CODE<-factor(data$RESOLUTION_CODE)
+
+summary(data)
+
+```
+
+# Imputing NA's in Condition
+
+```{r}
+data$Condition<-ifelse(is.na(data$Condition),as.character("Out of Service"),as.character(data$Condition))
+
+data$Condition<-factor(data$Condition)
+
+summary(data)
+
+```
+
+# Date Manipulations and Hour Calculations 
+
+Here we manipualte the columns i.e bring together the date and time column together in POSIXct class to facilitate easy manipulations to find time difference etc.
+
+```{r}
+summary(data)
+
+a =data %>% mutate(Create.Date.Time=as.POSIXct(paste(Ticket.Create.Date,Ticket.Create.Time), format="%d/%m/%Y %H:%M:%S"),
+                   Closed.Date.Time=as.POSIXct(paste(Ticket.Closed.Date,Ticket.Closed.Time), format="%d/%m/%Y %H:%M:%S"),
+                   Resolution.Date.Time=as.POSIXct(paste(Ticket.Resolution.Date,Ticket.Resolution.Time), format="%d/%m/%Y %H:%M:%S"),
+                   Time.to.Close=Closed.Date.Time-Create.Date.Time) %>% 
+  select(Line.Of.Business,Customer.SEGMENT,Ticket.Number,City,Province,Condition,Dispatch.Tier,RESOLUTION_CODE,Create.Date.Time,Closed.Date.Time
+         ,Resolution.Date.Time,Time.To.Restore..Hrs.,Time.to.Close) 
+
+head(a)
+
+summary(a)
+
+```
+
+We can now see that we have introduced new columns. i.e binded two columns into single column and create a new column (Time.to.Close). Since the difference units is in Sec we convert to hours using the following syntax.
+
+```{r}
+units(a$Time.to.Close) <- "hours"
+
+a$Time.to.Close<-round(a$Time.to.Close,2)
+
+a$Time.to.Close<-as.numeric(a$Time.to.Close)
+
+summary(a)
+
+tail(a)
+
+write.csv(a,"final_data.csv")
+
+```
+

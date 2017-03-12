@@ -1,0 +1,403 @@
+---
+title: ' Data - Analysis'
+output: html_document
+---
+
+```{r}
+
+library(dplyr)
+library(reshape2)
+library(gbm)
+library(randomForest)
+library(rpart)
+library(ggplot2)
+library(nnet)
+
+```
+
+# Basic Insights
+
+We group the records we found City-wise and find the Average Restoration time. We find the top cities with High Mean restoration time are SPRING COULEE, FRANCOIS LAKE,EDGEWOOD,VAVENBY,KINGCOME INLET,LOOS,70 MILE HOUSE,LITTLE BUFFALO LK   ,HOT SPRINGS COVE, FARRELL CREEK .
+ 
+```{r}
+#read final.csv file.
+
+data<-read.csv(file.choose())
+
+head(data)
+
+city_group<- data %>%  group_by(City) %>% summarise(mean.time.restore=mean(Time.To.Restore..Hrs.)) %>%  
+             arrange(desc(mean.time.restore))
+
+head(city_group)
+
+```
+
+We pick the top 100 cities that require attention to reduce the mean.restoration time and plot them in a graph. The density plot is also shown for the mean.restoration.time.
+
+```{r}
+ggplot(aes(x =City , y = mean.time.restore), data = city_group[1:100,]) + geom_point()+
+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+ggplot(city_group, aes(x=mean.time.restore)) + geom_density()
+
+```
+
+# The maximum number of complaints in a specific area and their Line.of.Business. 
+
+Here we find the number of complaints for the various resolution.codes. By knowing the numbers we understand the types of problems raised by customers in specific areas. The top areas that requires attention indicates that 07408SS Code was a common issue raised by users at various cities and provinces. However the time required to solve these common Codes raised was less compared to the unique or uncommon issues that consumed higher time to resolve.
+
+```{r}
+
+city_group<- data %>%  group_by(Province,City,Line.Of.Business,Condition,RESOLUTION_CODE,Time.To.Restore..Hrs.) %>% 
+  summarise(no.of.complaints= n()) %>%  arrange(desc(no.of.complaints),Time.To.Restore..Hrs.)
+
+head(city_group)
+tail(city_group)
+
+```
+
+The same logic done above could be extended to specific Customer.SEGMENT. We could sort the common and uncommon issues raised depending on City and the segment they belong to. 
+
+```{r}
+city_group1<- data %>%  group_by(City,Customer.SEGMENT,RESOLUTION_CODE) %>% select(City,Customer.SEGMENT,RESOLUTION_CODE) %>% 
+             summarise(same.code= n()) %>%  summarise(max.repetiton = names(which(table(RESOLUTION_CODE) ==                                 max(table(RESOLUTION_CODE)))[1]))
+
+
+head(city_group1,10)
+
+
+```
+
+Here we now create a pivot table to see the various Customer.SEGMENTS and the number of complaints registered at each RESOLUTION.CODE. The same is also evident from the graph which shows the variety of problems registered by them while the pivot gives the numbers.
+
+```{r}
+
+city_group<- data %>%  group_by(RESOLUTION_CODE,City,Customer.SEGMENT,Time.To.Restore..Hrs.) %>% 
+  summarise(no.of.complaints= n()) %>%  arrange(desc(no.of.complaints),Time.To.Restore..Hrs.)
+
+ggplot(data = city_group,aes(x=RESOLUTION_CODE,y=Customer.SEGMENT))+  geom_point()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+pivot<-city_group %>% select(RESOLUTION_CODE,City,Customer.SEGMENT,no.of.complaints) %>% dcast(City+Customer.SEGMENT~RESOLUTION_CODE,value.var="no.of.complaints",fun.aggregate = length)
+
+head(pivot)
+
+ggplot(data = city_group,aes(x=RESOLUTION_CODE))+  geom_bar()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+
+The above procedure is repeated to just the Customer.SEGMENT detail and not considering other features.
+
+```{r}
+customer_group<- data %>%  group_by(Customer.SEGMENT,RESOLUTION_CODE) %>% summarise(same.code= n()) %>%  
+  arrange(desc(same.code))
+
+head(customer_group)
+
+ggplot(data = customer_group,aes(x=RESOLUTION_CODE))+  geom_bar()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+
+```{r}
+
+str(data)
+
+cust_data<-read.csv("C:/Users/HP/Downloads/painterview_customersurvey/painterview_customersurvey.csv")
+
+str(cust_data)
+
+colnames(data)[4]<-"TICKET_NUMBER"
+
+new_data<-merge(data,cust_data,by="TICKET_NUMBER")
+
+str(new_data)
+
+head(new_data)
+
+```
+
+Here we try to relate the Customer.Experience.Score obtained after a Survey from around 9878 customers. We try to relate the Mean.time (average time) required to restore the services with the Feedback Score. The lesser the time it takes the better the score. This is also evident by looking at median which gives additional evidence.
+
+```{r}
+
+new_data<-new_data %>% arrange(desc(Customer.Experience.Score))
+
+
+cust_exp_group<-new_data %>%  group_by(Customer.Experience.Score) %>% select(Customer.Experience.Score,Time.To.Restore..Hrs.) %>% 
+              summarise(mean.time= mean(Time.To.Restore..Hrs.)) %>% 
+              arrange(desc(Customer.Experience.Score),mean.time)
+
+head(cust_exp_group)
+
+cust_exp_group<-new_data %>%  group_by(Customer.Experience.Score) %>% select(Customer.Experience.Score,Time.To.Restore..Hrs.) %>% 
+              summarise(median.time= median(Time.To.Restore..Hrs.)) %>% 
+              arrange(desc(Customer.Experience.Score),median.time)
+
+head(cust_exp_group)
+
+```
+
+We also visualize the above facts by looking at the boxplots. We remove a few outliers and look at the plots to find that lesser the median time better is the score.
+
+```{r}
+new_data$Customer.Experience.Score<-as.factor(new_data$Customer.Experience.Score)
+
+ggplot(new_data, aes(x=Customer.Experience.Score,y=Time.To.Restore..Hrs.)) +   geom_boxplot()
+
+new_data1<-new_data[new_data$Time.To.Restore..Hrs.<400,]
+
+ggplot(new_data1, aes(x=Customer.Experience.Score,y=Time.To.Restore..Hrs.)) +   geom_boxplot()
+
+```
+
+# Best Scores based on Customer.SEGMENT and the Dispatch Tier. 
+
+
+```{r}
+
+new_data<-new_data %>% arrange(desc(Customer.Experience.Score))
+
+str(new_data)
+
+cust.seg_exp_group<- new_data %>%  group_by(Customer.SEGMENT,Dispatch.Tier) %>% select(Customer.SEGMENT,Dispatch.Tier,Time.To.Restore..Hrs.,Customer.Experience.Score) %>% 
+        arrange(desc(Customer.Experience.Score),Dispatch.Tier)
+
+head(cust.seg_exp_group)
+
+```
+
+We the see the probability of getting a certain score by each Dispatch Tier by creating a prop.table.
+
+```{r}
+
+prop.table(table(cust.seg_exp_group$Customer.Experience.Score,cust.seg_exp_group$Dispatch.Tier),1)
+
+```
+
+
+
+#  Modelling to Predict the Customer.Scores 
+
+We are predicting the Customer Experience.Score here which has 5 levels hence we resort to a Multinomial Regression to understand the effects of individual variables on the Customer.Experience.Score. During the execution the final iteration gives us a log-likelihood value of 9758 and the residual Deviance is twice the log-likelihood value(19516).
+
+
+```{r}
+
+test <- multinom(Customer.Experience.Score ~ RESOLUTION_CODE+  Time.To.Restore..Hrs.+ Dispatch.Tier, data = new_data,maxit=450)
+
+test
+
+summary(test)
+
+```
+
+Output Interpretation :
+
+1. Say a Unit Increase in *Time.To.Restore..Hrs.* increases a log chance of  0.0001503841 getting a Customer.Score of 2.
+   Say a Unit Increase in *Dispatch.Tier* increases a log chance of  0.1437632 getting a Customer.Score of 2.
+
+
+Now we calculate the z-score and suitable p-value for each variable. The p-value helps us decide the importance of a variable in predicting the Customer.score. The coeff and std.errors are obtained using the Multinomial Logistic Regression. We exponentiate the coeff to obtain the risk ratios.
+
+```{r}
+
+zscore <- summary(test)$coefficients/summary(test)$standard.errors
+
+pvalue<- 2 * pnorm(-abs(zscore))
+
+pvalue
+
+exp(coef(test))
+
+```
+Output Interpretation :
+
+The relative risk ratio for a one-unit increase in the *Time.To.Restore..Hrs.*  variable is 1.0001504 for getting a Customer.Score of 2.
+
+## fitted values
+```{r}
+
+head(pp <- fitted(test))
+
+```
+
+We now create a test_data and predict the Customer.Score.probabilities using the Multinomial.log.model. We then bind the probabilities to the test.data and using the melt function to manipulate the data frame and plot the probabilities graph.
+
+```{r}
+
+str(new_data)
+
+model_data<-new_data[,c("RESOLUTION_CODE" ,"Time.To.Restore..Hrs.","Dispatch.Tier")]
+
+index<-sample(1:nrow(new_data),5000,replace=F)
+
+test_data<-model_data[-index,-8]
+
+str(test_data)
+
+pred=predict(test,test_data,type="prob")
+
+head(pred)
+
+a=cbind(test_data, pred)
+
+str(a)
+
+df<- melt (a,id.vars=c("RESOLUTION_CODE", "Time.To.Restore..Hrs.","Dispatch.Tier"),variable.name= "Customer.Score",value.name="probablity")
+
+head(df)
+
+
+ggplot(df, aes(x = Dispatch.Tier, y = probablity, colour = Customer.Score)) + geom_line() + facet_grid(Customer.Score ~ ., scales="free")
+
+```
+
+We create another Multinomial.log.model using another set of variables.
+
+```{r,eval=FALSE}
+
+
+test1 <- multinom(Customer.Experience.Score ~ Customer.SEGMENT +  Time.To.Restore..Hrs.+ Dispatch.Tier, data = new_data,maxit=450)
+
+test1
+
+summary(test1)
+
+head(fitted(test1))
+
+z <- summary(test1)$coefficients/summary(test1)$standard.errors
+z
+
+p<- 2 * pnorm(-abs(z))
+p
+
+exp(coef(test1))
+
+head(pp <- fitted(test1))
+
+```
+
+#Recursive Partitioning Tree.
+
+```{r,eval=F}
+
+
+model_data<-new_data[,c("Line.Of.Business","Customer.SEGMENT","City","Province","Dispatch.Tier","RESOLUTION_CODE","Time.To.Restore..Hrs.","Customer.Experience.Score")]
+
+
+plot(Customer.Experience.Score~Time.To.Restore..Hrs.+RESOLUTION_CODE+Dispatch.Tier,data=model_data,col="darkblue")
+
+mct=rpart(Customer.Experience.Score~Customer.SEGMENT+Time.To.Restore..Hrs.+RESOLUTION_CODE+Dispatch.Tier,data=model_data)
+
+mct
+
+summary(mct)
+
+plot(mct,asp=3)   #asp - aspect ratio y/x to resize for better viewing.
+text(mct)
+
+```
+
+#   Modelling to Predict the Customer.Scores
+
+A Randomforest model splits the training data we supply into a Train(2/3rd) and Test(1/3rd).The model then fits on the Train and calculate the OOB rate using the test data. We optimize our model by choosing suitable ntrees and mtry.
+
+```{r,eval=FALSE}
+
+
+
+index<-sample(1:nrow(new_data),5000,replace=F)
+
+model_data<-new_data[,c(4,5,7,8,9,10,14,16)]
+
+test_data<-model_data[-index,-8]
+
+str(test_data)
+
+train_data<-model_data[index,]
+
+str(train_data)
+```
+
+
+We find the best mtry- no of variables to start splitting upon and ntrees- the number of trees to be in the forest using the tuneRF and lapply functions.
+
+```{r,eval=F}
+
+mtry <- tuneRF(train_data[,c(1:7)],train_data$Customer.Experience.Score,ntreeTry=1000,stepFactor=1.5,
+               improve=0.01, trace=TRUE, plot=TRUE)
+
+mtry
+
+ntree<-c(100,500,750,1000,1250,1500)
+
+set_models<-lapply(ntree,function(x)
+{
+  
+  randomForest(Customer.Experience.Score~.,data=model_data,ntree=x,mtry=2)
+} )
+
+```
+
+OOB estimate is the amount of error or misclassifications on the test_data(1/3rd of the train we supplied).
+
+```{r,eval=F}
+
+final_model<-set_models[[1]]
+
+## OR ###
+
+final_model<-randomForest(Customer.Experience.Score~.,data=model_data,ntree=100,mtry=2)
+
+```
+
+```{r,eval=F}
+
+importance(final_model)
+
+varImpPlot(final_model)
+
+```
+
+
+
+```{r,eval=F}
+
+results<-predict(final_model,newdata = test_data)
+
+nrow(test_data)
+
+length(results)
+
+a=model_data[-index,8]==results
+
+table(a)
+
+```
+
+## Fitting a Gradient. Boosting . Model. 
+
+```{r,eval=F}
+
+model_data1<-as.data.frame(model_data)
+gbm = gbm(shot_made_flag~., model_data1, n.trees=400, shrinkage=0.01,distribution="gaussian",
+          interaction.depth=7,cv.fold=10, n.minobsinnode = 50)
+
+gbm.perf(gbm,method="cv")
+
+test_data<-model_data1[-sub,]
+
+gbm_results<- predict.gbm(gbm, test_data, n.trees = 400,type="response")
+
+gbm_results<-round(gbm_results,0)
+
+a=model_data[-index,8]==gbm_results
+
+table(a)
+
+```
+
+
+
